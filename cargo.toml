@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 bevy = "0.15"
+rand = "0.8"
 
 # Optional: faster compile times during development
 # Uncomment the lines below and run: cargo run
