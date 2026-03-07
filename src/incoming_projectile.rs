@@ -66,7 +66,7 @@ impl IncomingProjectile {
 
 fn spawn_random(mut commands: Commands, projectiles: Query<&IncomingProjectile>) {
     let num_current_projectiles = projectiles.iter().len();
-    let num_target_projectiles = 5000;
+    let num_target_projectiles = 256;
 
     if num_current_projectiles >= num_target_projectiles {
         return;
@@ -142,15 +142,26 @@ fn alt_cross_2d(gizmos: &mut Gizmos, center: Vec2, radius: f32, color: impl Into
 }
 
 fn draw_segment_and_dot(mut gizmos: Gizmos, projectiles: Query<&IncomingProjectile>) {
+    gizmos.line_2d(
+        -500.0 * Vec2::Y - 100.0 * Vec2::X,
+        500.0 * Vec2::Y - 100.0 * Vec2::X,
+        Color::WHITE,
+    );
+
     for projectile in projectiles.iter() {
         gizmos.line_2d(projectile.aa, projectile.bb, tailwind::GRAY_600);
+    }
+
+    for projectile in projectiles.iter() {
         gizmos.cross_2d(
             Isometry2d::from_translation(projectile.aa),
             5.0,
             tailwind::AMBER_200,
         );
         alt_cross_2d(&mut gizmos, projectile.bb, 5.0, tailwind::LIME_200);
+    }
 
+    for projectile in projectiles.iter() {
         let tt = projectile.time_to_target();
         let ii = Isometry2d::new(
             projectile.current_position(),
@@ -168,7 +179,7 @@ fn draw_segment_and_dot(mut gizmos: Gizmos, projectiles: Query<&IncomingProjecti
             );
         } else {
             let radius = (tt * BLAST_SPEED).min(projectile.radius);
-            gizmos.circle_2d(ii, radius, Color::WHITE);
+            gizmos.circle_2d(ii, radius, tailwind::RED_200);
         }
     }
 }
