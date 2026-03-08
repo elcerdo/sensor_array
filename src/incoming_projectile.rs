@@ -2,6 +2,7 @@ use bevy::color::palettes::tailwind;
 use bevy::prelude::*;
 use rand::Rng;
 use rand_distr::Distribution;
+use rstar::{RTree, RTreeObject, AABB};
 
 use crate::sink_and_source::{Sink, Source};
 
@@ -12,6 +13,7 @@ pub struct IncomingConfig {
     pub show_trajectories: bool,
     pub show_projectiles: bool,
     pub num_target_projectiles: usize,
+    pub num_spawned_projectiles: usize,
 }
 
 impl Default for IncomingConfig {
@@ -20,6 +22,7 @@ impl Default for IncomingConfig {
             show_trajectories: false,
             show_projectiles: true,
             num_target_projectiles: 256,
+            num_spawned_projectiles: 0,
         }
     }
 }
@@ -79,6 +82,16 @@ impl IncomingProjectile {
         assert!(delta.length() > 0.0);
         delta.to_angle()
     }
+
+    fn should_despawn(&self) -> bool {
+        self.time_to_target() > self.radius / BLAST_SPEED + BLAST_LINGER
+    }
+
+    fn blast_radius(&self) -> f32 {
+        let tt = self.time_to_target();
+        assert!(tt >= 0.0);
+        (tt * BLAST_SPEED).min(self.radius)
+    }
 }
 
 // --- Setup ---
@@ -86,10 +99,12 @@ impl IncomingProjectile {
 fn spawn_random(
     mut commands: Commands,
     projectiles: Query<&IncomingProjectile>,
-    state: Res<IncomingConfig>,
+    mut state: ResMut<IncomingConfig>,
     sources: Query<(&Transform, &Source)>,
     sinks: Query<&Transform, With<Sink>>,
 ) {
+    state.num_spawned_projectiles = 0;
+
     let num_current_projectiles = projectiles.iter().len();
     if num_current_projectiles >= state.num_target_projectiles {
         return;
@@ -104,8 +119,11 @@ fn spawn_random(
         return;
     }
 
+    let num_spawned_projectiles = (state.num_target_projectiles - num_current_projectiles).min(32);
+    state.num_spawned_projectiles = num_spawned_projectiles;
+
     let mut rng = rand::thread_rng();
-    for _ in 0..(state.num_target_projectiles - num_current_projectiles).min(32) {
+    for _ in 0..num_spawned_projectiles {
         let (emit_pos, source) = sources_data[rng.gen_range(0..sources_data.len())];
         let target_pos = target_positions[rng.gen_range(0..target_positions.len())];
         let target_pos =
@@ -170,12 +188,11 @@ fn draw_segment_and_dot(
 
     if state.show_projectiles {
         for projectile in projectiles.iter() {
-            let tt = projectile.time_to_target();
             let ii = Isometry2d::new(
                 projectile.current_position(),
                 projectile.direction_angle().into(),
             );
-            if tt < 0.0 {
+            if projectile.time_to_target() < 0.0 {
                 gizmos.primitive_2d(
                     &Triangle2d::new(
                         Vec2::new(5.0, 0.0),
@@ -186,7 +203,7 @@ fn draw_segment_and_dot(
                     tailwind::RED_200,
                 );
             } else {
-                let radius = (tt * BLAST_SPEED).min(projectile.radius);
+                let radius = projectile.blast_radius();
                 gizmos.circle_2d(ii, radius, tailwind::RED_200);
             }
         }
@@ -195,43 +212,61 @@ fn draw_segment_and_dot(
 
 fn despawn_elapsed(mut commands: Commands, projectiles: Query<(Entity, &IncomingProjectile)>) {
     for (entity, projectile) in projectiles.iter() {
-        if projectile.time_to_target() > projectile.radius / BLAST_SPEED + BLAST_LINGER {
+        if projectile.should_despawn() {
             commands.entity(entity).despawn();
         }
     }
 }
 
+struct ProjectileEntry {
+    target_pos: Vec2,
+    blast_radius: f32,
+}
+
+impl RTreeObject for ProjectileEntry {
+    type Envelope = AABB<[f32; 2]>;
+    fn envelope(&self) -> Self::Envelope {
+        let blast_radius = self.blast_radius;
+        AABB::from_corners(
+            [
+                self.target_pos.x - blast_radius,
+                self.target_pos.y - blast_radius,
+            ],
+            [
+                self.target_pos.x + blast_radius,
+                self.target_pos.y + blast_radius,
+            ],
+        )
+    }
+}
+
 fn score_hits(mut sinks: Query<(&Transform, &mut Sink)>, projectiles: Query<&IncomingProjectile>) {
+    let entries: Vec<ProjectileEntry> = projectiles
+        .iter()
+        .filter_map(|projectile| {
+            if projectile.should_despawn() {
+                return None;
+            }
+            let time_to_target = projectile.time_to_target();
+            if time_to_target < 0.0 {
+                return None;
+            }
+            Some(ProjectileEntry {
+                target_pos: projectile.target_pos,
+                blast_radius: projectile.blast_radius(),
+            })
+        })
+        .collect();
+
+    let tree = RTree::bulk_load(entries);
+
     for (sink_transform, mut sink) in sinks.iter_mut() {
         let sink_pos = sink_transform.translation.truncate();
-        for projectile in projectiles.iter() {
-            let tt = projectile.time_to_target();
-            let at_target = tt >= 0.0 && tt <= BLAST_LINGER;
-            let within_radius = projectile.target_pos.distance(sink_pos)
-                <= (tt * BLAST_SPEED).min(projectile.radius);
-            if at_target && within_radius {
+        let query = AABB::from_point([sink_pos.x, sink_pos.y]);
+        for entry in tree.locate_in_envelope_intersecting(&query) {
+            if entry.target_pos.distance(sink_pos) <= entry.blast_radius {
                 sink.hit_count += 1;
             }
         }
     }
 }
-
-// /// Writes the formatted HH:MM:SS string to the ClockDisplay text entity.
-// fn update_clock_display(
-//     clock_query: Query<&IncomingProjectile>,
-//     mut display_query: Query<&mut Text, With<ClockDisplay>>,
-// ) {
-//     let Ok(clock) = clock_query.single() else {
-//         return;
-//     };
-//     let Ok(mut text) = display_query.single_mut() else {
-//         return;
-//     };
-
-//     let total = clock.elapsed as u32;
-//     let h = total / 3600;
-//     let m = (total % 3600) / 60;
-//     let s = total % 60;
-
-//     **text = format!("{:02}:{:02}:{:02}", h, m, s);
-// }

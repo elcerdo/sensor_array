@@ -45,20 +45,24 @@ fn draw_egui_panel(
             ui.checkbox(&mut state.show_trajectories, "trajectories");
             ui.checkbox(&mut state.show_projectiles, "projectiles");
 
-            ui.separator();
-            let options = [8usize, 64, 128, 256, 512, 1024, 16 * 1024];
-            let selected_label = state.num_target_projectiles.to_string();
-            egui::ComboBox::from_label("target")
-                .selected_text(&selected_label)
-                .show_ui(ui, |ui| {
-                    for &option in &options {
-                        ui.selectable_value(
-                            &mut state.num_target_projectiles,
-                            option,
-                            option.to_string(),
-                        );
-                    }
-                });
-            ui.label(format!("total {num_projectile}"));
+            ui.horizontal(|ui| {
+                let options = [8usize, 64, 128, 256, 512, 1024, 16 * 1024];
+                let selected_label = state.num_target_projectiles.to_string();
+                egui::ComboBox::from_label("projectiles")
+                    .selected_text(&selected_label)
+                    .show_ui(ui, |ui| {
+                        for &option in &options {
+                            ui.selectable_value(
+                                &mut state.num_target_projectiles,
+                                option,
+                                option.to_string(),
+                            );
+                        }
+                    });
+                ui.label(format!(
+                    "[{0:04}] +{1:02}/frame",
+                    num_projectile, state.num_spawned_projectiles,
+                ));
+            });
         });
 }

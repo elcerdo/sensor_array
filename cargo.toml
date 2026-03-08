@@ -7,6 +7,7 @@ edition = "2021"
 bevy = "0.15"
 rand = "0.8"
 rand_distr = "0.4"
+rstar = "0.12"
 bevy_egui = "0.31"
 
 # Optional: faster compile times during development
