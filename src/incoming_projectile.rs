@@ -1,6 +1,9 @@
 use bevy::color::palettes::tailwind;
 use bevy::prelude::*;
 use rand::Rng;
+use rand_distr::Distribution;
+
+use crate::sink_and_source::{Sink, Source};
 
 // --- Resources ---
 
@@ -28,7 +31,6 @@ pub struct IncomingProjectilePlugin;
 impl Plugin for IncomingProjectilePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<IncomingConfig>();
-        app.add_systems(Startup, spawn_random);
         app.add_systems(
             Update,
             (
@@ -88,20 +90,28 @@ fn spawn_random(
     mut commands: Commands,
     projectiles: Query<&IncomingProjectile>,
     state: Res<IncomingConfig>,
+    sources: Query<(&Transform, &Source)>,
+    sinks: Query<&Transform, With<Sink>>,
 ) {
     let num_current_projectiles = projectiles.iter().len();
-
     if num_current_projectiles >= state.num_target_projectiles {
         return;
     }
 
-    assert!(num_current_projectiles < state.num_target_projectiles);
+    let sources_data: Vec<(Vec2, &Source)> = sources
+        .iter()
+        .map(|(t, s)| (t.translation.truncate(), s))
+        .collect();
+    let sink_positions: Vec<Vec2> = sinks.iter().map(|t| t.translation.truncate()).collect();
+    if sources_data.is_empty() || sink_positions.is_empty() {
+        return;
+    }
+
     let mut rng = rand::thread_rng();
     for _ in 0..(state.num_target_projectiles - num_current_projectiles).min(32) {
-        let aa = Vec2::new(rng.gen_range(-1.0..1.0), rng.gen_range(-1.0..1.0));
-        let bb = Vec2::new(rng.gen_range(-1.0..1.0), rng.gen_range(-1.0..1.0));
-        let aa = Vec2::splat(200.0) * aa - Vec2::X * 325.0;
-        let bb = Vec2::splat(300.0) * bb + Vec2::X * 225.0;
+        let (aa, source) = sources_data[rng.gen_range(0..sources_data.len())];
+        let bb = sink_positions[rng.gen_range(0..sink_positions.len())];
+        let bb = bb + Vec2::new(source.dist.sample(&mut rng), source.dist.sample(&mut rng));
         let speed = rng.gen_range(50.0..150.0);
         let radius = rng.gen_range(20.0..40.0);
         commands.spawn(IncomingProjectile {
@@ -112,41 +122,6 @@ fn spawn_random(
             elapsed: 0.0,
         });
     }
-
-    // // Spawn the on-screen HH:MM:SS display
-    // commands.spawn((
-    //     ClockDisplay,
-    //     Text::new("00:00:00"),
-    //     TextFont {
-    //         font_size: 72.0,
-    //         ..default()
-    //     },
-    //     TextColor(Color::srgb(0.2, 0.9, 0.4)),
-    //     Node {
-    //         position_type: PositionType::Absolute,
-    //         top: Val::Px(40.0),
-    //         left: Val::Px(0.0),
-    //         right: Val::Px(0.0),
-    //         ..default()
-    //     },
-    // ));
-
-    // // Speed hint label
-    // commands.spawn((
-    //     Text::new("Speed: 1x  |  [ / ] to adjust"),
-    //     TextFont {
-    //         font_size: 24.0,
-    //         ..default()
-    //     },
-    //     TextColor(Color::srgb(0.7, 0.7, 0.7)),
-    //     Node {
-    //         position_type: PositionType::Absolute,
-    //         top: Val::Px(130.0),
-    //         left: Val::Px(0.0),
-    //         right: Val::Px(0.0),
-    //         ..default()
-    //     },
-    // ));
 }
 
 // --- Update ---
