@@ -17,14 +17,19 @@ pub struct SinkAndSourcePlugin;
 impl Plugin for SinkAndSourcePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn_sink_and_source);
-        app.add_systems(Update, randomize_on_r);
+        app.add_systems(Update, (randomize_on_r, update_sink_labels));
     }
 }
 
 // --- Components ---
 
+#[derive(Component, Default)]
+pub struct Sink {
+    pub hit_count: u32,
+}
+
 #[derive(Component)]
-pub struct Sink;
+struct SinkLabel;
 
 #[derive(Component)]
 pub struct Source {
@@ -46,12 +51,23 @@ fn spawn_sink_and_source(
     for _ in 0..10 {
         let raw = Vec2::new(rng.gen_range(-1.0..1.0), rng.gen_range(-1.0..1.0));
         let position = Vec2::splat(300.0) * raw + Vec2::X * 225.0;
-        commands.spawn((
-            Sink,
-            Mesh2d(meshes.add(Circle::new(SHAPE_SIZE))),
-            MeshMaterial2d(sink_mat.clone()),
-            from_translation_2d(position),
-        ));
+        commands
+            .spawn((
+                Sink::default(),
+                Mesh2d(meshes.add(Circle::new(SHAPE_SIZE))),
+                MeshMaterial2d(sink_mat.clone()),
+                from_translation_2d(position),
+            ))
+            .with_child((
+                SinkLabel,
+                Text2d::new("0"),
+                TextFont {
+                    font_size: 14.0,
+                    ..default()
+                },
+                TextColor(Color::BLACK),
+                Transform::from_xyz(0.0, 0.0, 1.0),
+            ));
     }
 
     for _ in 0..10 {
@@ -72,6 +88,19 @@ fn spawn_sink_and_source(
 }
 
 // --- Update ---
+
+fn update_sink_labels(
+    sinks: Query<(&Sink, &Children)>,
+    mut labels: Query<&mut Text2d, With<SinkLabel>>,
+) {
+    for (sink, children) in sinks.iter() {
+        for child in children.iter() {
+            if let Ok(mut text) = labels.get_mut(*child) {
+                **text = sink.hit_count.to_string();
+            }
+        }
+    }
+}
 
 fn randomize_on_r(
     keys: Res<ButtonInput<KeyCode>>,

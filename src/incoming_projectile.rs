@@ -17,7 +17,7 @@ pub struct IncomingConfig {
 impl Default for IncomingConfig {
     fn default() -> Self {
         Self {
-            show_trajectories: true,
+            show_trajectories: false,
             show_projectiles: true,
             num_target_projectiles: 256,
         }
@@ -38,6 +38,7 @@ impl Plugin for IncomingProjectilePlugin {
                 despawn_elapsed,
                 spawn_random,
                 draw_segment_and_dot,
+                score_hits,
             ),
         );
     }
@@ -50,39 +51,35 @@ const BLAST_LINGER: f32 = 0.2;
 
 #[derive(Component)]
 pub(crate) struct IncomingProjectile {
-    pub aa: Vec2,
-    pub bb: Vec2,
-    pub speed: f32,
-    pub radius: f32,
-    pub elapsed: f32,
+    emit_pos: Vec2,
+    target_pos: Vec2,
+    speed: f32,
+    radius: f32,
+    elapsed: f32,
 }
 
 impl IncomingProjectile {
     fn current_position(&self) -> Vec2 {
-        let delta = self.bb - self.aa;
+        let delta = self.target_pos - self.emit_pos;
         assert!(delta.length() > 0.0);
         assert!(self.speed > 0.0);
         let xx = (self.speed * self.elapsed).clamp(0.0, delta.length());
-        self.aa + xx * delta.normalize()
+        self.emit_pos + xx * delta.normalize()
     }
 
     fn time_to_target(&self) -> f32 {
-        let delta = self.bb - self.aa;
+        let delta = self.target_pos - self.emit_pos;
         assert!(delta.length() > 0.0);
         assert!(self.speed > 0.0);
         self.elapsed - delta.length() / self.speed
     }
 
     fn direction_angle(&self) -> f32 {
-        let delta = self.bb - self.aa;
+        let delta = self.target_pos - self.emit_pos;
         assert!(delta.length() > 0.0);
         delta.to_angle()
     }
 }
-
-// /// Marks the text entity that displays the clock face.
-// #[derive(Component)]
-// struct ClockDisplay;
 
 // --- Setup ---
 
@@ -102,21 +99,22 @@ fn spawn_random(
         .iter()
         .map(|(t, s)| (t.translation.truncate(), s))
         .collect();
-    let sink_positions: Vec<Vec2> = sinks.iter().map(|t| t.translation.truncate()).collect();
-    if sources_data.is_empty() || sink_positions.is_empty() {
+    let target_positions: Vec<Vec2> = sinks.iter().map(|t| t.translation.truncate()).collect();
+    if sources_data.is_empty() || target_positions.is_empty() {
         return;
     }
 
     let mut rng = rand::thread_rng();
     for _ in 0..(state.num_target_projectiles - num_current_projectiles).min(32) {
-        let (aa, source) = sources_data[rng.gen_range(0..sources_data.len())];
-        let bb = sink_positions[rng.gen_range(0..sink_positions.len())];
-        let bb = bb + Vec2::new(source.dist.sample(&mut rng), source.dist.sample(&mut rng));
+        let (emit_pos, source) = sources_data[rng.gen_range(0..sources_data.len())];
+        let target_pos = target_positions[rng.gen_range(0..target_positions.len())];
+        let target_pos =
+            target_pos + Vec2::new(source.dist.sample(&mut rng), source.dist.sample(&mut rng));
         let speed = rng.gen_range(50.0..150.0);
         let radius = rng.gen_range(20.0..40.0);
         commands.spawn(IncomingProjectile {
-            aa,
-            bb,
+            emit_pos,
+            target_pos,
             speed,
             radius,
             elapsed: 0.0,
@@ -153,16 +151,20 @@ fn draw_segment_and_dot(
 
     if state.show_trajectories {
         for projectile in projectiles.iter() {
-            gizmos.line_2d(projectile.aa, projectile.bb, tailwind::GRAY_600);
+            gizmos.line_2d(
+                projectile.emit_pos,
+                projectile.target_pos,
+                tailwind::GRAY_600,
+            );
         }
 
         for projectile in projectiles.iter() {
             gizmos.cross_2d(
-                Isometry2d::from_translation(projectile.aa),
+                Isometry2d::from_translation(projectile.emit_pos),
                 5.0,
                 tailwind::AMBER_200,
             );
-            alt_cross_2d(&mut gizmos, projectile.bb, 5.0, tailwind::LIME_200);
+            alt_cross_2d(&mut gizmos, projectile.target_pos, 5.0, tailwind::LIME_200);
         }
     }
 
@@ -195,6 +197,21 @@ fn despawn_elapsed(mut commands: Commands, projectiles: Query<(Entity, &Incoming
     for (entity, projectile) in projectiles.iter() {
         if projectile.time_to_target() > projectile.radius / BLAST_SPEED + BLAST_LINGER {
             commands.entity(entity).despawn();
+        }
+    }
+}
+
+fn score_hits(mut sinks: Query<(&Transform, &mut Sink)>, projectiles: Query<&IncomingProjectile>) {
+    for (sink_transform, mut sink) in sinks.iter_mut() {
+        let sink_pos = sink_transform.translation.truncate();
+        for projectile in projectiles.iter() {
+            let tt = projectile.time_to_target();
+            let at_target = tt >= 0.0 && tt <= BLAST_LINGER;
+            let within_radius = projectile.target_pos.distance(sink_pos)
+                <= (tt * BLAST_SPEED).min(projectile.radius);
+            if at_target && within_radius {
+                sink.hit_count += 1;
+            }
         }
     }
 }
