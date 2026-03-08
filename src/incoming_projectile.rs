@@ -2,12 +2,30 @@ use bevy::color::palettes::tailwind;
 use bevy::prelude::*;
 use rand::Rng;
 
+// --- Resources ---
+
+#[derive(Resource)]
+pub struct IncomingState {
+    pub show_trajectories: bool,
+    pub show_blast_radii: bool,
+}
+
+impl Default for IncomingState {
+    fn default() -> Self {
+        Self {
+            show_trajectories: true,
+            show_blast_radii: true,
+        }
+    }
+}
+
 // --- Plugin ---
 
 pub struct IncomingProjectilePlugin;
 
 impl Plugin for IncomingProjectilePlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<IncomingState>();
         app.add_systems(Startup, spawn_random);
         app.add_systems(
             Update,
@@ -27,7 +45,7 @@ const BLAST_SPEED: f32 = 400.0;
 const BLAST_LINGER: f32 = 0.2;
 
 #[derive(Component)]
-struct IncomingProjectile {
+pub(crate) struct IncomingProjectile {
     pub aa: Vec2,
     pub bb: Vec2,
     pub speed: f32,
