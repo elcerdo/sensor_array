@@ -5,16 +5,18 @@ use rand::Rng;
 // --- Resources ---
 
 #[derive(Resource)]
-pub struct IncomingState {
+pub struct IncomingConfig {
     pub show_trajectories: bool,
-    pub show_blast_radii: bool,
+    pub show_projectiles: bool,
+    pub num_target_projectiles: usize,
 }
 
-impl Default for IncomingState {
+impl Default for IncomingConfig {
     fn default() -> Self {
         Self {
             show_trajectories: true,
-            show_blast_radii: true,
+            show_projectiles: true,
+            num_target_projectiles: 256,
         }
     }
 }
@@ -25,7 +27,7 @@ pub struct IncomingProjectilePlugin;
 
 impl Plugin for IncomingProjectilePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<IncomingState>();
+        app.init_resource::<IncomingConfig>();
         app.add_systems(Startup, spawn_random);
         app.add_systems(
             Update,
@@ -82,16 +84,20 @@ impl IncomingProjectile {
 
 // --- Setup ---
 
-fn spawn_random(mut commands: Commands, projectiles: Query<&IncomingProjectile>) {
+fn spawn_random(
+    mut commands: Commands,
+    projectiles: Query<&IncomingProjectile>,
+    state: Res<IncomingConfig>,
+) {
     let num_current_projectiles = projectiles.iter().len();
-    let num_target_projectiles = 256;
 
-    if num_current_projectiles >= num_target_projectiles {
+    if num_current_projectiles >= state.num_target_projectiles {
         return;
     }
 
+    assert!(num_current_projectiles < state.num_target_projectiles);
     let mut rng = rand::thread_rng();
-    for _ in num_current_projectiles..num_target_projectiles {
+    for _ in 0..(state.num_target_projectiles - num_current_projectiles).min(32) {
         let aa = Vec2::new(rng.gen_range(-1.0..1.0), rng.gen_range(-1.0..1.0));
         let bb = Vec2::new(rng.gen_range(-1.0..1.0), rng.gen_range(-1.0..1.0));
         let aa = Vec2::splat(200.0) * aa - Vec2::X * 325.0;
@@ -159,45 +165,53 @@ fn alt_cross_2d(gizmos: &mut Gizmos, center: Vec2, radius: f32, color: impl Into
     gizmos.line_2d(center - bb, center + bb, color);
 }
 
-fn draw_segment_and_dot(mut gizmos: Gizmos, projectiles: Query<&IncomingProjectile>) {
+fn draw_segment_and_dot(
+    mut gizmos: Gizmos,
+    projectiles: Query<&IncomingProjectile>,
+    state: Res<IncomingConfig>,
+) {
     gizmos.line_2d(
         -500.0 * Vec2::Y - 100.0 * Vec2::X,
         500.0 * Vec2::Y - 100.0 * Vec2::X,
         Color::WHITE,
     );
 
-    for projectile in projectiles.iter() {
-        gizmos.line_2d(projectile.aa, projectile.bb, tailwind::GRAY_600);
-    }
+    if state.show_trajectories {
+        for projectile in projectiles.iter() {
+            gizmos.line_2d(projectile.aa, projectile.bb, tailwind::GRAY_600);
+        }
 
-    for projectile in projectiles.iter() {
-        gizmos.cross_2d(
-            Isometry2d::from_translation(projectile.aa),
-            5.0,
-            tailwind::AMBER_200,
-        );
-        alt_cross_2d(&mut gizmos, projectile.bb, 5.0, tailwind::LIME_200);
-    }
-
-    for projectile in projectiles.iter() {
-        let tt = projectile.time_to_target();
-        let ii = Isometry2d::new(
-            projectile.current_position(),
-            projectile.direction_angle().into(),
-        );
-        if tt < 0.0 {
-            gizmos.primitive_2d(
-                &Triangle2d::new(
-                    Vec2::new(5.0, 0.0),
-                    Vec2::new(-5.0, 3.0),
-                    Vec2::new(-5.0, -3.0),
-                ),
-                ii,
-                tailwind::RED_200,
+        for projectile in projectiles.iter() {
+            gizmos.cross_2d(
+                Isometry2d::from_translation(projectile.aa),
+                5.0,
+                tailwind::AMBER_200,
             );
-        } else {
-            let radius = (tt * BLAST_SPEED).min(projectile.radius);
-            gizmos.circle_2d(ii, radius, tailwind::RED_200);
+            alt_cross_2d(&mut gizmos, projectile.bb, 5.0, tailwind::LIME_200);
+        }
+    }
+
+    if state.show_projectiles {
+        for projectile in projectiles.iter() {
+            let tt = projectile.time_to_target();
+            let ii = Isometry2d::new(
+                projectile.current_position(),
+                projectile.direction_angle().into(),
+            );
+            if tt < 0.0 {
+                gizmos.primitive_2d(
+                    &Triangle2d::new(
+                        Vec2::new(5.0, 0.0),
+                        Vec2::new(-5.0, 3.0),
+                        Vec2::new(-5.0, -3.0),
+                    ),
+                    ii,
+                    tailwind::RED_200,
+                );
+            } else {
+                let radius = (tt * BLAST_SPEED).min(projectile.radius);
+                gizmos.circle_2d(ii, radius, tailwind::RED_200);
+            }
         }
     }
 }
